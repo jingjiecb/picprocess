@@ -102,12 +102,6 @@ func compressImageToJPEG(inputPath string, maxKB int) (string, error) {
 	if err != nil {
 		return inputPath, fmt.Errorf("failed to open file %s: %v", inputPath, err)
 	}
-	defer func(file *os.File) {
-		err := file.Close()
-		if err != nil {
-			fmt.Printf("failed to close file %s: %v", inputPath, err)
-		}
-	}(file)
 
 	var img image.Image
 	originalSupportedExt := []string{".jpg", ".jpeg", ".png", ".gif"}
@@ -121,6 +115,12 @@ func compressImageToJPEG(inputPath string, maxKB int) (string, error) {
 	}
 	if err != nil {
 		return inputPath, fmt.Errorf("failed to decode image %s: %v", inputPath, err)
+	}
+
+	err = file.Close()
+	if err != nil {
+		fmt.Printf("failed to close file %s: %v", inputPath, err)
+		return inputPath, err
 	}
 
 	var buffer bytes.Buffer
