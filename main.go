@@ -1,21 +1,25 @@
 package main
 
 import (
-	"bytes"
 	"flag"
 	"fmt"
 	"image"
 	_ "image/gif"
-	"image/jpeg"
+	_ "image/jpeg"
 	_ "image/png"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 )
 
 func main() {
 	dir := flag.String("d", ".", "Directory to search for image files")
+	outputDir := flag.String("o", "./processed", "Output directory")
+
+	if dir == outputDir {
+		fmt.Println("Warning! Output directory should not be the same directory")
+	}
+
 	flag.Usage = func() {
 		fmt.Printf("Usage: %s [OPTIONS]\n", os.Args[0])
 		flag.PrintDefaults()
@@ -28,42 +32,33 @@ func main() {
 		return
 	}
 
-	var newFiles []string
+	var errorFiles []string
+	index := 1
 	for _, file := range files {
-		newFile, err := compressImageToJPEG(file, 300)
+		jpgImage, err := compressFileToJPEG(file, 300)
 		if err != nil {
 			fmt.Printf("fail to process all pictures in %s, cause: %s\n", *dir, err)
+			continue
 		}
-		newFiles = append(newFiles, newFile)
+		newJpgPath := getNewJpgPath(*outputDir, index)
+		index++
+
+		err = jpgImage.SaveToFile(newJpgPath)
+		if err != nil {
+			fmt.Printf("fail to save image to %s, cause: %s\n", newJpgPath, err)
+			continue
+		}
+
+		fmt.Printf("Successfully processed: %s ==> %s", file, newJpgPath)
 	}
 
-	err = renameFiles(newFiles)
-	if err != nil {
-		fmt.Printf("fail to rename files, cause: %s\n", err)
-		return
+	if len(errorFiles) > 0 {
+		fmt.Printf("Some files cannot be processed, you can process them manually: %s\n", strings.Join(errorFiles, "; "))
 	}
-
-	fmt.Printf("%d files processed.\n", len(newFiles))
 }
 
-func renameFiles(filePaths []string) error {
-	for i, filePath := range filePaths {
-		ext := filepath.Ext(filePath)
-		newFileName := fmt.Sprintf("%d%s", i+1, ext)
-
-		dir := filepath.Dir(filePath)
-
-		newFilePath := filepath.Join(dir, newFileName)
-
-		err := os.Rename(filePath, newFilePath)
-		if err != nil {
-			return fmt.Errorf("failed to rename file %s to %s: %v", filePath, newFilePath, err)
-		}
-
-		fmt.Printf("Renamed: %s -> %s\n", filePath, newFilePath)
-	}
-
-	return nil
+func getNewJpgPath(dir string, index int) string {
+	return filepath.Join(dir, fmt.Sprintf("%d.jpg", index))
 }
 
 func getImageFiles(dir string) ([]string, error) {
@@ -97,72 +92,62 @@ func isImageFile(fileName string) bool {
 	return false
 }
 
-func compressImageToJPEG(inputPath string, maxKB int) (string, error) {
-	file, err := os.Open(inputPath)
+func compressFileToJPEG(filePath string, maxKB int) (*JPGImage, error) {
+	file, err := os.Open(filePath)
 	if err != nil {
-		return inputPath, fmt.Errorf("failed to open file %s: %v", inputPath, err)
+		return nil, fmt.Errorf("failed to open file %s: %v", filePath, err)
+	}
+	defer file.Close()
+
+	if ok, jpgImage := tryGetJPGWithoutProcessing(file, maxKB); ok {
+		return jpgImage, nil
 	}
 
-	var img image.Image
-	originalSupportedExt := []string{".jpg", ".jpeg", ".png", ".gif"}
-	ext := filepath.Ext(inputPath)
-	if slices.Contains(originalSupportedExt, ext) {
-		img, _, err = image.Decode(file)
-	} else {
-		err = fmt.Errorf("unsupported file extension: %s", ext)
-	}
+	file.Seek(0, 0)
+	img, err := readImage(file)
 	if err != nil {
-		return inputPath, fmt.Errorf("failed to decode image %s: %v", inputPath, err)
+		return nil, err
 	}
 
-	err = file.Close()
+	jpgImage, err := compressImageToJPEG(img, maxKB)
 	if err != nil {
-		fmt.Printf("failed to close file %s: %v", inputPath, err)
-		return inputPath, err
+		return nil, err
 	}
+	return jpgImage, nil
+}
 
-	var buffer bytes.Buffer
-	quality := 100
-	for quality >= 10 {
-		buffer.Reset()
+func readImage(file *os.File) (image.Image, error) {
+	img, _, err := image.Decode(file)
+	if err != nil {
+		return nil, err
+	}
+	return img, nil
+}
 
-		err = jpeg.Encode(&buffer, img, &jpeg.Options{Quality: quality})
-		if err != nil {
-			return "", fmt.Errorf("failed to encode image: %v", err)
+func tryGetJPGWithoutProcessing(file *os.File, maxKB int) (bool, *JPGImage) {
+	// if the image is already ok, skip
+	jpgImage, err := NewJPGImageFromFile(file)
+	if err == nil {
+		if jpgImage.IsSizeLessOrEqualThan(maxKB) {
+			return true, jpgImage
 		}
+	}
 
-		if buffer.Len() <= maxKB*1024 {
-			break
+	return false, nil
+}
+
+func compressImageToJPEG(img image.Image, maxKB int) (*JPGImage, error) {
+	quality := 100
+	for quality > 1 {
+		newJPGImage, err := NewJPGImage(img, quality)
+		if err != nil {
+			return nil, err
+		}
+		if newJPGImage.IsSizeLessOrEqualThan(maxKB) {
+			return newJPGImage, nil
 		}
 		quality -= 5
 	}
 
-	if buffer.Len() > maxKB*1024 {
-		return inputPath, fmt.Errorf("unable to compress image %s to %dKB", inputPath, maxKB)
-	}
-
-	fileName := filepath.Base(inputPath)
-	filePosition := filepath.Dir(inputPath)
-	outputPath := filepath.Join(filePosition, strings.TrimSuffix(fileName, filepath.Ext(fileName))+".jpg")
-
-	_ = os.Remove(outputPath)
-	_ = os.Remove(inputPath)
-
-	outFile, err := os.Create(outputPath)
-	if err != nil {
-		return outputPath, fmt.Errorf("failed to create output file %s: %v", inputPath, err)
-	}
-	defer func(outFile *os.File) {
-		err := outFile.Close()
-		if err != nil {
-			fmt.Printf("failed to close output file %s: %v", inputPath, err)
-		}
-	}(outFile)
-
-	_, err = outFile.Write(buffer.Bytes())
-	if err != nil {
-		return inputPath, fmt.Errorf("failed to write output file %s: %v", inputPath, err)
-	}
-
-	return outputPath, nil
+	return nil, fmt.Errorf("unable to compress image to %dKB", maxKB)
 }
