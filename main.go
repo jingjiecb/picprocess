@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"flag"
 	"fmt"
-	"github.com/chai2010/webp"
 	"image"
+	_ "image/gif"
 	"image/jpeg"
 	_ "image/png"
 	"os"
@@ -106,9 +106,7 @@ func compressImageToJPEG(inputPath string, maxKB int) (string, error) {
 	var img image.Image
 	originalSupportedExt := []string{".jpg", ".jpeg", ".png", ".gif"}
 	ext := filepath.Ext(inputPath)
-	if ext == ".webp" {
-		img, err = webp.Decode(file)
-	} else if slices.Contains(originalSupportedExt, ext) {
+	if slices.Contains(originalSupportedExt, ext) {
 		img, _, err = image.Decode(file)
 	} else {
 		err = fmt.Errorf("unsupported file extension: %s", ext)
