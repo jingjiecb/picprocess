@@ -14,7 +14,7 @@ import (
 
 func main() {
 	inputDir := flag.String("i", ".", "Directory to search for image files")
-	outputDir := flag.String("o", "./processed", "Output directory")
+	outputDir := flag.String("o", "", "Output directory")
 	maxSizeKB := flag.Int("s", 300, "Maximum size(KB) of image files")
 
 	flag.Usage = func() {
@@ -25,6 +25,9 @@ func main() {
 
 	if inputDir == outputDir {
 		fmt.Println("Warning! Output directory should not be the same directory")
+	}
+	if *outputDir == "" {
+		*outputDir = filepath.Join(*inputDir, "processed")
 	}
 
 	err := ensureDirExists(*outputDir)
