@@ -13,12 +13,9 @@ import (
 )
 
 func main() {
-	dir := flag.String("d", ".", "Directory to search for image files")
+	inputDir := flag.String("i", ".", "Directory to search for image files")
 	outputDir := flag.String("o", "./processed", "Output directory")
-
-	if dir == outputDir {
-		fmt.Println("Warning! Output directory should not be the same directory")
-	}
+	maxSizeKB := flag.Int("s", 300, "Maximum size(KB) of image files")
 
 	flag.Usage = func() {
 		fmt.Printf("Usage: %s [OPTIONS]\n", os.Args[0])
@@ -26,18 +23,28 @@ func main() {
 	}
 	flag.Parse()
 
-	files, err := getImageFiles(*dir)
+	if inputDir == outputDir {
+		fmt.Println("Warning! Output directory should not be the same directory")
+	}
+
+	err := ensureDirExists(*outputDir)
 	if err != nil {
-		fmt.Printf("unable to read pictures in %s, cause: %s\n", *dir, err)
+		fmt.Println(err)
+		os.Exit(1)
+	}
+
+	files, err := getImageFiles(*inputDir)
+	if err != nil {
+		fmt.Printf("unable to read pictures in %s, cause: %s\n", *inputDir, err)
 		return
 	}
 
 	var errorFiles []string
 	index := 1
 	for _, file := range files {
-		jpgImage, err := compressFileToJPEG(file, 300)
+		jpgImage, err := compressFileToJPEG(file, *maxSizeKB)
 		if err != nil {
-			fmt.Printf("fail to process all pictures in %s, cause: %s\n", *dir, err)
+			fmt.Printf("fail to process all pictures in %s, cause: %s\n", *inputDir, err)
 			continue
 		}
 		newJpgPath := getNewJpgPath(*outputDir, index)
@@ -49,12 +56,19 @@ func main() {
 			continue
 		}
 
-		fmt.Printf("Successfully processed: %s ==> %s", file, newJpgPath)
+		fmt.Printf("Successfully processed: %s ==> %s \n", file, newJpgPath)
 	}
 
 	if len(errorFiles) > 0 {
 		fmt.Printf("Some files cannot be processed, you can process them manually: %s\n", strings.Join(errorFiles, "; "))
 	}
+}
+
+func ensureDirExists(dir string) error {
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		return os.MkdirAll(dir, os.ModePerm)
+	}
+	return nil
 }
 
 func getNewJpgPath(dir string, index int) string {
@@ -64,18 +78,15 @@ func getNewJpgPath(dir string, index int) string {
 func getImageFiles(dir string) ([]string, error) {
 	var imagePaths []string
 
-	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-
-		if !info.IsDir() && isImageFile(info.Name()) {
-			imagePaths = append(imagePaths, path)
-		}
-		return nil
-	})
+	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
+	}
+
+	for _, entry := range entries {
+		if entry.Type().IsRegular() && isImageFile(entry.Name()) {
+			imagePaths = append(imagePaths, filepath.Join(dir, entry.Name()))
+		}
 	}
 
 	return imagePaths, nil

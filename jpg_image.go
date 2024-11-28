@@ -49,6 +49,7 @@ func NewJPGImageFromFile(file *os.File) (*JPGImage, error) {
 		return nil, errors.New("image is not JPEG")
 	}
 
+	file.Seek(0, 0)
 	var buffer bytes.Buffer
 	_, err = io.Copy(&buffer, file)
 	return &JPGImage{content: &buffer}, nil
